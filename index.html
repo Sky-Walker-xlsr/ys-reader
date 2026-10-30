@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ys-reader — RSVP Speed Reader</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="favicon.png" type="image/png">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  /* Setup screen */
+  #setupScreen {
+    height: 100vh;
+    background: #1a1a1a;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2rem;
+  }
+  #setupScreen h1 {
+    margin: 0 0 1rem 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #fff;
+  }
+  #textInput {
+    width: 100%;
+    max-width: 600px;
+    height: 240px;
+    background: #262626;
+    color: #eee;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    padding: 1rem;
+    font-size: 1rem;
+    font-family: inherit;
+    resize: vertical;
+  }
+  #textInput:focus {
+    outline: none;
+    border-color: #ff0000;
+  }
+  .controls-row {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .controls-row label {
+    font-size: 0.95rem;
+    color: #bbb;
+  }
+  #wpmInput, #fontSizeInput {
+    background: #262626;
+    color: #eee;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 1rem;
+    width: 100px;
+  }
+  #wpmInput:focus, #fontSizeInput:focus {
+    outline: none;
+    border-color: #ff0000;
+  }
+  #startBtn {
+    width: 100%;
+    max-width: 600px;
+    background: #ff0000;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.85rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #startBtn:hover {
+    background: #d40000;
+  }
+  .hint {
+    font-size: 0.8rem;
+    color: #777;
+  }
+
+  /* Reading / countdown screen */
+  #readingScreen {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #000;
+    align-items: center;
+    justify-content: center;
+  }
+  #wordDisplay {
+    color: #ff0000;
+    font-size: 1.25rem;
+    font-weight: bold;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    text-align: center;
+    padding: 0 1rem;
+    user-select: none;
+  }
+  #closeBtn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    font-size: 2rem;
+    color: #ff0000;
+    opacity: 0.15;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s ease;
+    line-height: 1;
+  }
+  #closeBtn:hover {
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+
+  <div id="setupScreen">
+    <h1>RSVP Speed Reader</h1>
+    <textarea id="textInput" placeholder="Paste your text here"></textarea>
+    <div class="controls-row">
+      <label for="wpmInput">Speed (WPM)</label>
+      <input id="wpmInput" type="number" value="500" min="60" max="1500" step="10">
+      <label for="fontSizeInput">Font size (rem)</label>
+      <input id="fontSizeInput" type="number" value="1.25" min="0.5" max="10" step="0.25">
+    </div>
+    <button id="startBtn">Start</button>
+    <div class="hint">Ctrl+Enter to start</div>
+  </div>
+
+  <div id="readingScreen">
+    <div id="closeBtn">&times;</div>
+    <div id="wordDisplay"></div>
+  </div>
+
+<script>
+(function () {
+  var setupScreen = document.getElementById('setupScreen');
+  var readingScreen = document.getElementById('readingScreen');
+  var textInput = document.getElementById('textInput');
+  var wpmInput = document.getElementById('wpmInput');
+  var fontSizeInput = document.getElementById('fontSizeInput');
+  var startBtn = document.getElementById('startBtn');
+  var closeBtn = document.getElementById('closeBtn');
+  var wordDisplay = document.getElementById('wordDisplay');
+
+  var words = [];
+  var currentIndex = 0;
+  var wpm = 500;
+  var delay = 120;
+  var playing = false;
+  var timerId = null;
+  var onReadingScreen = false;
+  var countdownLock = false;
+
+  function clamp(i) {
+    return Math.max(0, Math.min(words.length - 1, i));
+  }
+
+  function renderWord() {
+    wordDisplay.textContent = words[currentIndex];
+  }
+
+  function tick() {
+    if (currentIndex < words.length - 1) {
+      currentIndex++;
+      renderWord();
+      timerId = setTimeout(tick, delay);
+    } else {
+      playing = false;
+    }
+  }
+
+  function play() {
+    if (playing) return;
+    if (currentIndex >= words.length - 1) return;
+    playing = true;
+    timerId = setTimeout(tick, delay);
+  }
+
+  function pause() {
+    playing = false;
+    clearTimeout(timerId);
+  }
+
+  function moveBy(delta) {
+    currentIndex = clamp(currentIndex + delta);
+    renderWord();
+  }
+
+  function jumpPeriod(dir) {
+    var idx = -1;
+    if (dir > 0) {
+      for (var i = currentIndex + 1; i < words.length; i++) {
+        if (words[i].charAt(words[i].length - 1) === '.') {
+          idx = i + 1;
+          break;
+        }
+      }
+      if (idx === -1) idx = words.length - 1;
+    } else {
+      for (var j = currentIndex - 1; j >= 0; j--) {
+        if (words[j].charAt(words[j].length - 1) === '.') {
+          idx = j + 1;
+          break;
+        }
+      }
+      if (idx === -1) idx = 0;
+    }
+    currentIndex = clamp(idx);
+    renderWord();
+  }
+
+  function beginReading() {
+    currentIndex = 0;
+    playing = false;
+    renderWord();
+    play();
+  }
+
+  function showCountdown() {
+    setupScreen.style.display = 'none';
+    readingScreen.style.display = 'flex';
+    onReadingScreen = true;
+    countdownLock = true;
+    wordDisplay.textContent = '2';
+    setTimeout(function () {
+      wordDisplay.textContent = '1';
+      setTimeout(function () {
+        countdownLock = false;
+        beginReading();
+      }, 1000);
+    }, 1000);
+  }
+
+  function startFlow() {
+    var text = textInput.value;
+    if (text.trim() === '') return;
+
+    var parsedWpm = parseInt(wpmInput.value, 10);
+    if (isNaN(parsedWpm)) parsedWpm = 500;
+    wpm = parsedWpm;
+    delay = 60000 / wpm;
+
+    var parsedFontSize = parseFloat(fontSizeInput.value);
+    if (isNaN(parsedFontSize) || parsedFontSize <= 0) parsedFontSize = 1.25;
+    wordDisplay.style.fontSize = parsedFontSize + 'rem';
+
+    words = text.split(/\s+/).filter(function (t) { return t.length > 0; });
+    if (words.length === 0) return;
+
+    showCountdown();
+  }
+
+  function returnToSetup() {
+    pause();
+    clearTimeout(timerId);
+    countdownLock = false;
+    onReadingScreen = false;
+    readingScreen.style.display = 'none';
+    setupScreen.style.display = 'flex';
+  }
+
+  startBtn.addEventListener('click', startFlow);
+  closeBtn.addEventListener('click', returnToSetup);
+
+  function setupKeydown(e) {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      startFlow();
+    }
+  }
+  textInput.addEventListener('keydown', setupKeydown);
+  wpmInput.addEventListener('keydown', setupKeydown);
+
+  document.addEventListener('keydown', function (e) {
+    if (!onReadingScreen) return;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      returnToSetup();
+      return;
+    }
+
+    if (countdownLock) return;
+
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      if (playing) {
+        pause();
+      } else {
+        play();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      if (playing) return;
+      e.preventDefault();
+      var dir = e.key === 'ArrowRight' ? 1 : -1;
+      if (e.ctrlKey && e.shiftKey) {
+        moveBy(dir * 50);
+      } else if (e.ctrlKey) {
+        jumpPeriod(dir);
+      } else if (e.shiftKey) {
+        moveBy(dir * 10);
+      } else {
+        moveBy(dir * 1);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
